@@ -1,0 +1,22 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Database file
+db.sqlite3
+
+# Virtual Environment folder
+venv/
+env/
+.env
+
+# User-uploaded files (media)
+media/
+
+# Static files collected for production
+staticfiles/
+
+# IDE and OS specific files
+.vscode/
+.idea/
+.DS_Store

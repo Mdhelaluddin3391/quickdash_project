@@ -1,0 +1,104 @@
+QuickDash - System Design (Django Stack)Yeh document "Quick Comers" web application ke liye ek high-level system design outline karta hai, jo Django framework par aadhaarit hai.1. Parichay (Overview)Lakshya (Goal): Ek Q-Commerce platform banana jo customers ko unke aas-paas ke "dark stores" ya warehouses se groceries aur anya zaroori saamaan 10-30 minute ke andar deliver kare.Mukhya Components:Customer Web/Mobile App: Products browse karne, order place karne, aur delivery track karne ke liye.Delivery Partner (Rider) App: Naye orders receive karne, pickup/drop-off manage karne, aur earnings track karne ke liye.Store/Warehouse App (Picker): Orders receive karne, items pick & pack karne, aur rider ko hand-over karne ke liye.Admin Dashboard: Products, inventory, users, orders, aur analytics manage karne ke liye.2. Takneeki Stack (Technology Stack)Aapka core stack Django hai. Yahaan ek complete setup diya gaya hai:Backend Framework: Django (Core logic, ORM, Admin Panel ke liye).API Layer: Django REST Framework (DRF) (Mobile apps aur web frontend se baat karne ke liye APIs banane ke liye).Real-time Communication: Django Channels (Rider location ko live track karne, order status updates, aur riders ko naye order notifications bhejne ke liye - WebSockets ka istemaal karke).Asynchronous Tasks: Celery (Redis ya RabbitMQ ke saath) (Notifications, SMS, email bhejne, payment processing, ya complex order assignment logic ko background mein chalaane ke liye).Database: PostgreSQL (Scalability aur advanced queries ke liye).Geo-spatial Data: PostGIS (PostgreSQL extension) GeoDjango ke saath (Riders ki live location store karne, nazdeeki store/rider dhoondhne, aur delivery radius manage karne ke liye).Caching: Redis (Frequently accessed data jaise product details, inventory, ya sessions ko cache karke app ki speed badhaane ke liye).Frontend (Web): React / Vue.js (Customer-facing web app ke liye - yeh DRF API se data lega). Django templates ka istemaal admin panel ya simple pages ke liye kiya ja sakta hai.Mobile Apps: React Native / Flutter (Customer aur Rider apps ke liye).3. Database Model Design (Mukhya Django Models)Yahaan ek basic database schema hai jo aap Django models ke roop mein banayenge:# (Yeh actual models.py code nahi hai, balki ek structure hai)
+
+# 1. User Management
+class User(AbstractUser):
+    # Django ka built-in User model extend karein
+    phone_number = models.CharField(max_length=15, unique=True)
+    role = models.CharField(choices=[('customer', 'Customer'), ('rider', 'Rider'), ('admin', 'Admin'), ('store_staff', 'Store Staff')])
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    # Role-specific data yahaan store karein
+
+class Address(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='addresses')
+    full_address = models.TextField()
+    city = models.CharField(max_length=100)
+    pincode = models.CharField(max_length=10)
+    location = models.PointField() # GeoDjango ka PointField (latitude, longitude)
+
+# 2. Product & Inventory Management
+class Category(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(unique=True)
+    icon = models.ImageField(upload_to='category_icons/', null=True, blank=True)
+
+class Product(models.Model):
+    name = models.CharField(max_length=255)
+    description = models.TextField()
+    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, related_name='products')
+    image = models.ImageField(upload_to='product_images/')
+
+class Store(models.Model):
+    # Yeh aapke "Dark Stores" hain
+    name = models.CharField(max_length=100)
+    location = models.PointField() # Store ki location
+    is_active = models.BooleanField(default=True)
+
+class StoreInventory(models.Model):
+    # Yeh model Q-Commerce ke liye sabse zaroori hai
+    store = models.ForeignKey(Store, on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    stock_quantity = models.PositiveIntegerField(default=0)
+    is_available = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('store', 'product') # Ek store mein ek product ki ek hi entry
+
+# 3. Order & Payment Management
+class Cart(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class CartItem(models.Model):
+    cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
+    inventory_item = models.ForeignKey(StoreInventory, on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField(default=1)
+
+class Order(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('CONFIRMED', 'Confirmed'),
+        ('PREPARING', 'Preparing'), # Store staff pick/pack kar raha hai
+        ('READY_FOR_PICKUP', 'Ready for Pickup'),
+        ('OUT_FOR_DELIVERY', 'Out for Delivery'),
+        ('DELIVERED', 'Delivered'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    store = models.ForeignKey(Store, on_delete=models.SET_NULL, null=True)
+    delivery_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    created_at = models.DateTimeField(auto_now_add=True)
+    payment_status = models.CharField(max_length=20, default='PENDING')
+
+class OrderItem(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
+    product_name = models.CharField(max_length=255) # Denormalized data
+    price_at_order = models.DecimalField(max_digits=10, decimal_places=2) # Price lock karna
+    quantity = models.PositiveIntegerField()
+
+class Payment(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE)
+    transaction_id = models.CharField(max_length=100)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=20) # 'SUCCESS', 'FAILED'
+
+# 4. Delivery (Rider) Management
+class RiderProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    current_location = models.PointField(null=True, blank=True)
+    is_online = models.BooleanField(default=False) # Rider online hai ya nahi
+    vehicle_details = models.CharField(max_length=100)
+
+class Delivery(models.Model):
+    order = models.OneToOneField(Order, on_delete=models.CASCADE)
+    rider = models.ForeignKey(RiderProfile, on_delete=models.SET_NULL, null=True)
+    pickup_time = models.DateTimeField(null=True, blank=True)
+    delivery_time = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=[('ASSIGNED', 'Assigned'), ('PICKED_UP', 'Picked Up'), ('DELIVERED', 'Delivered')])
+
+4. Mukhya API Endpoints (DRF)Aapko in models ke liye DRF ka istemaal karke REST APIs banani hongi./api/auth/register//api/auth/login//api/products/ (List, Search, Filter)/api/products/<id>/ (Details)/api/cart/ (View, Add, Update, Remove item)/api/orders/checkout/ (Order create karna)/api/orders/ (Order history list)/api/orders/<id>/ (Order details)/api/orders/<id>/track/ (Real-time tracking data (via WebSocket))/api/rider/profile//api/rider/update-location/ (Rider app se yeh API baar-baar call hogi)/api/rider/orders/available/ (Available orders dhoondhna)/api/rider/orders/accept//api/rider/orders/update-status/ (Picked up, Delivered)5. Mukhya Karyapravah (Core Workflows)Workflow 1: Order Placement (Customer)Browse & Add: Customer products browse karta hai aur StoreInventory se items cart mein add karta hai (jahaan stock_quantity > 0 ho).Checkout: Customer address select karta hai aur payment karta hai (e.g., Razorpay/Stripe).Order Creation:Payment success hone par, ek Order object create hota hai (status: PENDING).CartItem se OrderItem create hote hain.Sabse Zaroori: StoreInventory se stock_quantity kam ki jaati hai. Yeh ek database transaction ke andar hona chahiye taaki data consistent rahe. Django ka F() expression yahaan best hai.Order status CONFIRMED set hota hai.Trigger Fulfillment: Ek Celery task ya Channels message trigger hota hai jo naye order ki jaankari store staff aur delivery system ko deta hai.Workflow 2: Order Fulfillment (Store & Rider)Alert Store: Naya order store staff ke app par dikhta hai (status: CONFIRMED).Picking: Staff order accept karta hai, status PREPARING set hota hai. Staff items pick aur pack karta hai.Assign Rider (Logistics):Jaise hi order READY_FOR_PICKUP hota hai, system nazdeeki, available (is_online=True) riders ko dhoondhta hai (GeoDjango ka istemaal karke).System Django Channels ke zariye un riders ko real-time mein "New Order" notification bhejta hai.Rider Acceptance:Ek rider order accept karta hai.Delivery object create hota hai, order.assigned_rider set hota hai.Customer ko notification jaata hai: "Rider is on the way for pickup".Pickup & Delivery:Rider store se package pick karta hai, status OUT_FOR_DELIVERY set karta hai.Rider ki current_location (jo app se lagatar update ho rahi hai) Channels ke through customer ke app par live map par dikhayi jaati hai.Rider customer ke location par pahunch kar order hand-over karta hai aur status DELIVERED mark karta hai.Completion: Order complete. Rider ke earnings update hote hain.6. Django Admin PanelDjango ka built-in Admin aapke liye vardaan saabit hoga. Aap iska istemaal shuruaat mein in cheezon ke liye kar sakte hain:Products, Categories, aur Stores add/edit karna.Inventory (Price aur Stock) manage karna.Orders dekhna aur unka status manually change karna (agar zaroorat pade).Users (Customers/Riders) ko manage karna.Is design ko aap apne project ke starting point ke taur par istemaal kar sakte hain. Good luck!
