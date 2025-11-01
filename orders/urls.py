@@ -1,7 +1,7 @@
 # orders/urls.py
 from django.urls import path
 # OrderHistoryView ko import karo
-from .views import CheckoutView, OrderHistoryView
+from .views import CheckoutView, OrderHistoryView, StoreOrderUpdateView
 
 urlpatterns = [
     path('checkout/', CheckoutView.as_view(), name='checkout'),
