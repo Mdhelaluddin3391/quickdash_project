@@ -26,3 +26,8 @@ class CartSerializer(serializers.ModelSerializer):
 class AddCartItemSerializer(serializers.Serializer):
     inventory_item_id = serializers.IntegerField()
     quantity = serializers.IntegerField(min_value=1)
+
+class UpdateCartItemSerializer(serializers.Serializer):
+    # Quantity update karne ke liye sirf quantity ki zaroorat hai
+    quantity = serializers.IntegerField(min_value=0) 
+    # Agar quantity 0 aati hai, toh hum use remove kar denge

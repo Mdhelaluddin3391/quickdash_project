@@ -23,3 +23,9 @@ class OrderSerializer(serializers.ModelSerializer):
             'created_at',
             'items'
         ]
+
+class OrderStatusUpdateSerializer(serializers.Serializer):
+    # Sirf woh status allow karo jo store staff use karega
+    STATUS_CHOICES = ['PREPARING', 'READY_FOR_PICKUP', 'CANCELLED']
+    
+    status = serializers.ChoiceField(choices=STATUS_CHOICES)

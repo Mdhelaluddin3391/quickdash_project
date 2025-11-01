@@ -5,6 +5,8 @@ from rest_framework.permissions import IsAuthenticated
 from .models import Cart, CartItem
 from inventory.models import StoreInventory
 from .serializers import CartSerializer, AddCartItemSerializer
+from django.shortcuts import get_object_or_404 # Naya import
+from .serializers import CartSerializer, AddCartItemSerializer, UpdateCartItemSerializer # <-- Naya serializer import kiya
 
 class CartView(generics.RetrieveAPIView):
     serializer_class = CartSerializer
@@ -49,3 +51,43 @@ class AddToCartView(generics.GenericAPIView):
         cart_item.save()
 
         return Response({"success": "Item added to cart"}, status=status.HTTP_200_OK)
+
+
+class UpdateCartItemView(generics.GenericAPIView):
+    # Yeh view CartItem ke 'id' (pk) par kaam karega
+    serializer_class = UpdateCartItemSerializer
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        cart_item_id = self.kwargs.get('pk')
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        new_quantity = serializer.validated_data['quantity']
+        user_cart = Cart.objects.get(user=request.user)
+        
+        # Pehle cart item ko check karo ki woh user ke cart mein hai ya nahi
+        cart_item = get_object_or_404(
+            CartItem, 
+            id=cart_item_id, 
+            cart=user_cart
+        )
+
+        if new_quantity > 0:
+            # Agar quantity 0 se zyada hai, toh update karo
+            cart_item.quantity = new_quantity
+            cart_item.save()
+            return Response({"success": "Cart item quantity updated."}, status=status.HTTP_200_OK)
+        else:
+            # Agar quantity 0 ya usse kam hai, toh item ko hata do (Remove)
+            cart_item.delete()
+            return Response({"success": "Item removed from cart."}, status=status.HTTP_204_NO_CONTENT)
+
+# Agar hume sirf delete karna ho toh uske liye DeleteAPIView use kar sakte hain:
+class RemoveCartItemView(generics.DestroyAPIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        # Yeh queryset ensure karega ki user sirf apne cart items ko delete kar sakta hai
+        user_cart = get_object_or_404(Cart, user=self.request.user)
+        return CartItem.objects.filter(cart=user_cart)

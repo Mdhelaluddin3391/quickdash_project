@@ -4,7 +4,7 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Order
-from .serializers import OrderSerializer
+from .serializers import OrderSerializer , OrderStatusUpdateSerializer
 from .models import Order, OrderItem
 from accounts.models import Address
 from cart.models import Cart
@@ -74,3 +74,43 @@ class OrderHistoryView(generics.ListAPIView):
         # Yeh sirf logged-in user ke orders hi return karega
         user = self.request.user
         return Order.objects.filter(user=user).order_by('-created_at')
+
+
+
+class StoreOrderUpdateView(generics.GenericAPIView):
+    # Temporary permission: IsAuthenticated
+    # Asliyat mein hume 'store_staff' role ki permission check karni hogi
+    permission_classes = [IsAuthenticated] 
+    serializer_class = OrderStatusUpdateSerializer
+
+    def post(self, request, *args, **kwargs):
+        order_id = self.kwargs.get('pk')
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_status = serializer.validated_data['status']
+
+        try:
+            # Order ko fetch karo
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Status update logic
+        # Isme hum status change ki shart jodte hain
+        if order.status == new_status:
+            return Response({"error": f"Order is already in '{new_status}' status."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Ab status update karte hain
+        with transaction.atomic():
+            order.status = new_status
+            order.save()
+            
+            # Jab order READY_FOR_PICKUP ho, toh iska matlab hai ki ab yeh rider ko dikhega
+            if new_status == 'READY_FOR_PICKUP':
+                # TODO: Channels message bhejo nazdeeki riders ko
+                print(f"--- ALERT: Order {order.id} is READY_FOR_PICKUP. Notifying riders. ---")
+            
+        return Response(
+            {"success": f"Order {order.id} status updated to {new_status}.", "new_status": new_status}, 
+            status=status.HTTP_200_OK
+        )
